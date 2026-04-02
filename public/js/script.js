@@ -60,7 +60,7 @@ async function openArt(id) {
   try { const {art,ratings,comments} = await api(`artworks/${id}`); const avg=art.avgRating||0;
     const img = art.image_path ? `<img src="/${art.image_path}" style="width:100%;max-height:350px;object-fit:contain;background:#000;border-radius:var(--radius)" onerror="this.outerHTML='<div style=\\'width:100%;height:300px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7)\\'>Изображение</div>'">` : `<div style="width:100%;height:300px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);border-radius:var(--radius)">${TYPES[art.type]?.name}</div>`;
     let rateHTML = currentUser && currentUser.id!==art.user_id ? renderRates(art,ratings) : `<div class="rating-section"><div class="overall-score"><div class="score-circle"><span style="color:${avg>=7?'var(--success)':avg>=5?'var(--warning)':'var(--accent)'}">${avg.toFixed(1)}</span></div><div class="score-details"><h4>Средняя оценка</h4><p>На основе ${ratings.length} оценок</p></div></div></div>`;
-    document.getElementById('modalContent').innerHTML = `${img}<div class="modal-body"><h2>${art.title}</h2><p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.8rem">${TYPES[art.type]?.name} • ${new Date(art.created_at).toLocaleDateString('ru')}</p><p class="description">${art.description||''}</p><div class="modal-author-row"><div class="author"><div class="avatar" style="width:40px;height:40px;font-size:0.9rem;background:linear-gradient(135deg,${art.avatar_color||'#6366f1'},#3b82f6)">${(art.author_name||'?')[0]}</div><div><div style="font-weight:600">${art.author_name||'Аноним'}</div><div style="font-size:0.8rem;color:var(--text-muted)">${art.author_username||''}</div></div></div><div style="display:flex;gap:0.5rem"><button class="btn btn-sm btn-secondary" onclick="like('${art.id}')">❤️ ${art.likesCount||0}</button><button class="donate-btn" style="padding:0.4rem 0.9rem" onclick="closeModal('artworkModal');openDonate('${art.id}')">Донат</button></div></div>${rateHTML}<div class="comments-section"><h3>Комментарии (${comments.length})</h3>${currentUser?`<div class="comment-input"><input type="text" id="commentIn" placeholder="Написать..." onkeypress="if(event.key==='Enter')addComment('${art.id}')"><button class="btn btn-sm btn-primary" onclick="addComment('${art.id}')">➤</button></div>`:''}<div id="commList">${comments.map(c=>`<div class="comment"><div class="comment-avatar" style="background:linear-gradient(135deg,${c.avatar_color||'#6366f1'},#3b82f6)">${(c.author_name||'?')[0]}</div><div class="comment-content"><div class="comment-author">${c.author_name||'Аноним'}</div><div class="comment-text">${c.text}</div><div class="comment-time">${new Date(c.created_at).toLocaleDateString('ru')}</div></div></div>`).join('')||'<p style="color:var(--text-muted);text-align:center;padding:0.5rem">Пока нет</p>'}</div></div></div>`;
+    document.getElementById('modalContent').innerHTML = `${img}<div class="modal-body"><h2>${art.title}</h2><p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.8rem">${TYPES[art.type]?.name} • ${new Date(art.created_at).toLocaleDateString('ru')}</p><p class="description">${art.description||''}</p><div class="modal-author-row"><div class="author"><div class="avatar" style="width:40px;height:40px;font-size:0.9rem;background:linear-gradient(135deg,${art.avatar_color||'#6366f1'},#3b82f6)">${(art.author_name||'?')[0]}</div><div><div style="font-weight:600">${art.author_name||'Аноним'}</div><div style="font-size:0.8rem;color:var(--text-muted)">${art.author_username||''}</div></div></div><div style="display:flex;gap:0.5rem"><button class="btn btn-sm btn-secondary" onclick="like('${art.id}')">❤️ ${art.likesCount||0}</button><button class="donate-btn" style="padding:0.4rem 0.9rem" onclick="closeModal('artworkModal');openDonate('${art.id}')">Донат</button></div></div>${rateHTML}<div class="comments-section"><h3>Комментарии (${comments.length})</h3>${currentUser && currentUser.id!==art.user_id?`<div class="comment-input"><input type="text" id="commentIn" placeholder="Написать комментарий..." onkeypress="if(event.key==='Enter')addComment('${art.id}')"><button class="btn btn-sm btn-primary" onclick="addComment('${art.id}')">➤</button></div>`:''}${currentUser && currentUser.id===art.user_id?`<div style="margin-top:1rem;padding:0.8rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px"><p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.5rem">Вы владелец этой работы</p><button class="btn btn-sm" style="background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4)" onclick="deleteArtwork('${art.id}')">🗑️ Удалить работу</button></div>`:''}<div id="commList">${comments.map(c=>`<div class="comment"><div class="comment-avatar" style="background:linear-gradient(135deg,${c.avatar_color||'#6366f1'},#3b82f6)">${(c.author_name||'?')[0]}</div><div class="comment-content"><div class="comment-author">${c.author_name||'Аноним'}</div><div class="comment-text">${c.text}</div><div class="comment-time">${new Date(c.created_at).toLocaleDateString('ru')}</div></div></div>`).join('')||'<p style="color:var(--text-muted);text-align:center;padding:0.5rem">Пока нет</p>'}</div></div></div>`;
     document.getElementById('artworkModal').classList.add('show'); document.body.style.overflow='hidden';
   } catch(e){notify('Ошибка','warning')}
 }
@@ -98,4 +98,24 @@ function updateCriteria(){const t=document.getElementById('artType')?.value;cons
 function notify(text,type='info'){const n=document.getElementById('notification');n.querySelector('.notif-text').textContent=text;n.className=`notification ${type} show`;setTimeout(()=>n.classList.remove('show'),3000)}
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o){o.classList.remove('show');document.body.style.overflow=''}}));
 document.addEventListener('click',e=>{if(!e.target.closest('.user-menu'))document.getElementById('userDropdown')?.classList.remove('show')});
+async function deleteArtwork(id) {
+  if (!confirm('Удалить эту работу? Это действие нельзя отменить.')) return;
+  try {
+    const res = await fetch(`/api/artworks/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id })
+    });
+    if (res.ok) {
+      notify('Работа удалена', 'success');
+      closeModal('artworkModal');
+      loadFeed();
+    } else {
+      const err = await res.json();
+      notify(err.error || 'Ошибка удаления', 'warning');
+    }
+  } catch(e) {
+    notify(e.message, 'warning');
+  }
+}
 init();

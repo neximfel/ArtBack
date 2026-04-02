@@ -67,9 +67,12 @@ async function initDB() {
   console.log('✅ DB ready');
 }
 
-// === ЗАГРУЗКА ФАЙЛОВ ===
+// Гарантированное создание папки uploads
 const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log('📁 Created uploads directory:', uploadDir);
+}
 
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, uploadDir),
@@ -188,6 +191,35 @@ app.post('/api/artworks/:id', async (req, res) => {
     }
     res.status(400).json({ error: 'Unknown action' });
   } catch(e) { console.error('ART ACTION ERR:', e); res.status(500).json({ error: e.message }); }
+});
+// DELETE artwork
+app.delete('/api/artworks/:id', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const artId = req.params.id;
+    
+    // Проверка владельца
+    const art = await get('SELECT user_id, image_path FROM artworks WHERE id=?', [artId]);
+    if (!art) return res.status(404).json({ error: 'Работа не найдена' });
+    if (art.user_id !== userId) return res.status(403).json({ error: 'Только владелец может удалить работу' });
+    
+    // Удаление файла (если есть)
+    if (art.image_path && art.image_path.startsWith('/uploads/')) {
+      const filePath = path.join(__dirname, art.image_path);
+      try { fs.unlinkSync(filePath); } catch(e) { console.log('File not found:', filePath); }
+    }
+    
+    // Удаление связанных записей
+    await run('DELETE FROM ratings WHERE artwork_id=?', [artId]);
+    await run('DELETE FROM comments WHERE artwork_id=?', [artId]);
+    await run('DELETE FROM likes WHERE artwork_id=?', [artId]);
+    await run('DELETE FROM artworks WHERE id=?', [artId]);
+    
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('DELETE ART ERR:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/upload', upload.single('image'), (req, res) => {
