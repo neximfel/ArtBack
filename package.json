@@ -1,0 +1,7 @@
+{
+  "name": "artback",
+  "private": true,
+  "devDependencies": {
+    "wrangler": "^3.60.0"
+  }
+}

@@ -1,0 +1,4 @@
+node_modules/
+artback.db
+uploads/
+*.log

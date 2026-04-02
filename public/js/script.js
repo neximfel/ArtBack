@@ -1,0 +1,101 @@
+let currentUser = JSON.parse(localStorage.getItem('artback_session') || 'null');
+let currentFilter = 'all';
+let donateArtworkId = null;
+let donateAmount = 0;
+let selectedFile = null;
+
+const TYPES = {
+  digital: { name: 'Цифровой арт', objective: ['technique','composition','color','lighting'], subjective: ['vibe','originality'] },
+  traditional: { name: 'Живопись', objective: ['technique','composition','color','texture'], subjective: ['vibe','expression'] },
+  illustration: { name: 'Иллюстрация', objective: ['line','narrative','character','style'], subjective: ['vibe','charm'] },
+  photography: { name: 'Фотография', objective: ['exposure','focus','composition','timing'], subjective: ['vibe','storytelling'] },
+  '3d': { name: '3D', objective: ['topology','texturing','lighting','render'], subjective: ['vibe','creativity'] }
+};
+const GRADIENTS = ['linear-gradient(135deg,#3b82f6,#1e3a8a)','linear-gradient(135deg,#059669,#065f46)','linear-gradient(135deg,#d97706,#92400e)','linear-gradient(135deg,#6366f1,#4338ca)','linear-gradient(135deg,#475569,#1e293b)'];
+
+async function api(endpoint, method='GET', body=null) {
+  const opts = { method, headers: {} };
+  if (body) {
+    if (body instanceof FormData) opts.body = body;
+    else { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
+  }
+  const res = await fetch(`/api/${endpoint}`, opts);
+  if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'Ошибка сети');
+  return res.json();
+}
+
+function init() {
+  if (currentUser) { document.getElementById('userMenu').style.display = 'block'; document.getElementById('dropdownName').textContent = currentUser.name; document.getElementById('dropdownUsername').textContent = currentUser.username; document.getElementById('navAvatar').style.background = `linear-gradient(135deg, ${currentUser.avatar_color||'#6366f1'}, #3b82f6)`; showPage('feed'); }
+  else showPage('login');
+}
+
+function showPage(p) {
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  document.getElementById('page-'+p)?.classList.add('active');
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.page===p));
+  if (p==='feed') loadFeed(); if (p==='explore') renderExplore(); if (p==='upload') updateCriteria(); if (p==='profile') loadProfile();
+}
+function navigateTo(p) { if(!currentUser && !['login','register'].includes(p)){showPage('login');return} showPage(p) }
+
+async function login() {
+  try { const u = await api('auth/login','POST',{email:document.getElementById('loginEmail').value.trim(),password:document.getElementById('loginPassword').value.trim()}); currentUser=u; localStorage.setItem('artback_session',JSON.stringify(u)); document.getElementById('userMenu').style.display='block'; document.getElementById('dropdownName').textContent=u.name; document.getElementById('dropdownUsername').textContent=u.username; document.getElementById('navAvatar').style.background=`linear-gradient(135deg,${u.avatar_color||'#6366f1'},#3b82f6)`; showPage('feed'); notify(`Добро пожаловать, ${u.name}`,'success'); } catch(e){notify(e.message,'warning')}
+}
+async function register() {
+  try { const u = await api('auth/register','POST',{name:document.getElementById('regName').value.trim(),username:document.getElementById('regUsername').value.trim(),email:document.getElementById('regEmail').value.trim(),password:document.getElementById('regPassword').value.trim(),artType:document.getElementById('regArtType').value}); currentUser=u; localStorage.setItem('artback_session',JSON.stringify(u)); document.getElementById('userMenu').style.display='block'; document.getElementById('dropdownName').textContent=u.name; document.getElementById('dropdownUsername').textContent=u.username; document.getElementById('navAvatar').style.background=`linear-gradient(135deg,${u.avatar_color||'#6366f1'},#3b82f6)`; showPage('feed'); notify('Аккаунт создан','success'); } catch(e){notify(e.message,'warning')}
+}
+function logout() { currentUser=null; localStorage.removeItem('artback_session'); document.getElementById('userMenu').style.display='none'; document.getElementById('userDropdown').classList.remove('show'); showPage('login'); notify('Вы вышли','info') }
+function toggleDropdown() { document.getElementById('userDropdown').classList.toggle('show') }
+
+async function loadFeed() {
+  try { const arts = await api(`artworks?type=${currentFilter}`); const g = document.getElementById('feedGrid'); if(!arts.length){g.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">Нет работ</div><p>Будьте первым</p><button class="btn btn-primary" onclick="navigateTo('upload')" style="width:auto">Загрузить</button></div>`;return}
+    g.innerHTML = arts.map(a => {
+      const img = a.image_path ? `<div class="card-image"><img src="/${a.image_path}" alt="${a.title}" onerror="this.outerHTML='<div class=\\'placeholder\\' style=\\'background:${a.gradient}\\'>Изображение</div>'"></div>` : `<div class="placeholder" style="background:${a.gradient}">${TYPES[a.type]?.name || a.type}</div>`;
+      return `<div class="artwork-card" onclick="openArt('${a.id}')">${img}<span class="type-badge">${TYPES[a.type]?.name}</span><div class="card-body"><h3>${a.title}</h3><p class="desc">${a.description||''}</p><div class="card-meta"><div class="author"><div class="avatar" style="background:${a.avatar_color||'var(--gradient-main)'}">${(a.author_name||'?')[0]}</div><span>${a.author_name||'Аноним'}</span></div><div class="stats"><span>❤️ ${a.likesCount||0}</span><span>👁️ ${a.views||0}</span></div></div></div><div class="card-footer"><div class="rating-wrap"><div class="rating-bar"><div class="rating-fill" style="width:${(a.avgRating||0)*10}%"></div></div><span class="rating-text">${(a.avgRating||0).toFixed(1)}</span></div><button class="donate-btn" onclick="event.stopPropagation();openDonate('${a.id}')">Донат</button></div></div>`;
+    }).join('');
+  } catch(e){notify('Ошибка загрузки','warning')}
+}
+function filterFeed(t, btn) { currentFilter=t; document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); if(btn)btn.classList.add('active'); loadFeed() }
+
+async function openArt(id) {
+  try { const {art,ratings,comments} = await api(`artworks/${id}`); const avg=art.avgRating||0;
+    const img = art.image_path ? `<img src="/${art.image_path}" style="width:100%;max-height:350px;object-fit:contain;background:#000;border-radius:var(--radius)" onerror="this.outerHTML='<div style=\\'width:100%;height:300px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7)\\'>Изображение</div>'">` : `<div style="width:100%;height:300px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);border-radius:var(--radius)">${TYPES[art.type]?.name}</div>`;
+    let rateHTML = currentUser && currentUser.id!==art.user_id ? renderRates(art,ratings) : `<div class="rating-section"><div class="overall-score"><div class="score-circle"><span style="color:${avg>=7?'var(--success)':avg>=5?'var(--warning)':'var(--accent)'}">${avg.toFixed(1)}</span></div><div class="score-details"><h4>Средняя оценка</h4><p>На основе ${ratings.length} оценок</p></div></div></div>`;
+    document.getElementById('modalContent').innerHTML = `${img}<div class="modal-body"><h2>${art.title}</h2><p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.8rem">${TYPES[art.type]?.name} • ${new Date(art.created_at).toLocaleDateString('ru')}</p><p class="description">${art.description||''}</p><div class="modal-author-row"><div class="author"><div class="avatar" style="width:40px;height:40px;font-size:0.9rem;background:linear-gradient(135deg,${art.avatar_color||'#6366f1'},#3b82f6)">${(art.author_name||'?')[0]}</div><div><div style="font-weight:600">${art.author_name||'Аноним'}</div><div style="font-size:0.8rem;color:var(--text-muted)">${art.author_username||''}</div></div></div><div style="display:flex;gap:0.5rem"><button class="btn btn-sm btn-secondary" onclick="like('${art.id}')">❤️ ${art.likesCount||0}</button><button class="donate-btn" style="padding:0.4rem 0.9rem" onclick="closeModal('artworkModal');openDonate('${art.id}')">Донат</button></div></div>${rateHTML}<div class="comments-section"><h3>Комментарии (${comments.length})</h3>${currentUser?`<div class="comment-input"><input type="text" id="commentIn" placeholder="Написать..." onkeypress="if(event.key==='Enter')addComment('${art.id}')"><button class="btn btn-sm btn-primary" onclick="addComment('${art.id}')">➤</button></div>`:''}<div id="commList">${comments.map(c=>`<div class="comment"><div class="comment-avatar" style="background:linear-gradient(135deg,${c.avatar_color||'#6366f1'},#3b82f6)">${(c.author_name||'?')[0]}</div><div class="comment-content"><div class="comment-author">${c.author_name||'Аноним'}</div><div class="comment-text">${c.text}</div><div class="comment-time">${new Date(c.created_at).toLocaleDateString('ru')}</div></div></div>`).join('')||'<p style="color:var(--text-muted);text-align:center;padding:0.5rem">Пока нет</p>'}</div></div></div>`;
+    document.getElementById('artworkModal').classList.add('show'); document.body.style.overflow='hidden';
+  } catch(e){notify('Ошибка','warning')}
+}
+function closeModal(id){document.getElementById(id).classList.remove('show');document.body.style.overflow=''}
+async function like(id){try{const r=await api(`artworks/${id}`,'POST',{type:'like',userId:currentUser.id});notify(r.liked?'Лайк поставлен':'Уже лайкнули',r.liked?'success':'info');openArt(id)}catch(e){notify(e.message,'warning')}}
+async function addComment(id){const i=document.getElementById('commentIn');if(!i||!i.value.trim())return;await api(`artworks/${id}`,'POST',{type:'comment',userId:currentUser.id,text:i.value.trim()});openArt(id);notify('Добавлено','success')}
+
+function renderRates(art,ratings){
+  const t=TYPES[art.type]; if(!t)return''; const my=ratings.find(r=>r.user_id===currentUser.id); let h='';
+  let avg=0,c=0; ratings.forEach(r=>{const p=JSON.parse(r.params);Object.values(p).forEach(v=>{avg+=v;c++})}); avg=c?avg/c:0;
+  h+=`<div class="overall-score"><div class="score-circle"><span style="color:${avg>=7?'var(--success)':avg>=5?'var(--warning)':'var(--accent)'}">${avg.toFixed(1)}</span></div><div class="score-details"><h4>Общая оценка</h4><p>${ratings.length} оценок</p><div class="breakdown">${Object.entries(getBreakdown(ratings,t)).map(([k,v])=>`<div class="bd-item"><div class="bd-val">${v.toFixed(1)}</div><div class="bd-lbl">${k}</div></div>`).join('')}</div></div></div>`;
+  h+=`<div class="rating-section"><h3>Объективные метрики</h3><div class="params-grid">${t.objective.map(p=>`<div class="param-item"><div class="param-header"><span class="param-name">${p}</span><span class="cat-label cat-obj">Объективно</span><span class="param-value" id="v-${p}">—</span></div><input type="range" class="slider" min="1" max="10" value="${my?JSON.parse(my.params)[p]||5:5}" id="s-${p}" oninput="document.getElementById('v-${p}').textContent=this.value"></div>`).join('')}</div></div>`;
+  h+=`<div class="rating-section"><h3>Субъективные метрики</h3><div class="params-grid">${t.subjective.map(p=>`<div class="param-item"><div class="param-header"><span class="param-name">${p}</span><span class="cat-label cat-subj">Субъективно</span><span class="param-value" id="v-${p}">—</span></div><input type="range" class="slider" min="1" max="10" value="${my?JSON.parse(my.params)[p]||5:5}" id="s-${p}" oninput="document.getElementById('v-${p}').textContent=this.value"></div>`).join('')}</div></div>`;
+  h+=`<button class="btn btn-primary" onclick="submitRate('${art.id}')">Отправить оценку</button>`; return h;
+}
+function getBreakdown(rs,t){const b={};[...t.objective,...t.subjective].forEach(p=>{const v=rs.map(r=>JSON.parse(r.params)[p]).filter(x=>x!==undefined);b[p]=v.length?v.reduce((a,b)=>a+b,0)/v.length:0});return b}
+async function submitRate(id){const p={};Object.keys(TYPES[artworks.find(a=>a.id===id)?.type||'digital']||{objective:[],subjective:[]}).forEach(k=>{if(typeof TYPES[Object.keys(TYPES)[0]]==='object'){}}); Object.values(TYPES).forEach(t=>{if(t.objective)t.objective.forEach(k=>{const s=document.getElementById('s-'+k);if(s)p[k]=parseInt(s.value)});if(t.subjective)t.subjective.forEach(k=>{const s=document.getElementById('s-'+k);if(s)p[k]=parseInt(s.value)})}); await api(`artworks/${id}`,'POST',{type:'rate',userId:currentUser.id,params:p}); notify('Оценка сохранена','success'); openArt(id) }
+
+document.getElementById('fileInput')?.addEventListener('change', e=>{const f=e.target.files[0];if(!f||!f.type.startsWith('image/'))return notify('Выберите изображение','warning');selectedFile=f;const r=new FileReader();r.onload=ev=>{document.getElementById('previewImage').src=ev.target.result;document.getElementById('uploadPreview').style.display='block';document.getElementById('uploadArea').style.display='none'};r.readAsDataURL(f)});
+function removePreview(){selectedFile=null;document.getElementById('uploadPreview').style.display='none';document.getElementById('uploadArea').style.display='block';document.getElementById('fileInput').value=''}
+async function publishArtwork(){const t=document.getElementById('artTitle').value.trim();const d=document.getElementById('artDescription').value.trim();const ty=document.getElementById('artType').value;const tags=document.getElementById('artTags').value.split(',').map(x=>x.trim()).filter(Boolean);if(!t)return notify('Введите название','warning');if(!selectedFile)return notify('Выберите файл','warning');const btn=document.getElementById('publishBtn');btn.textContent='Загрузка...';btn.disabled=true;try{const u=await api('upload','POST',(()=>{const f=new FormData();f.append('image',selectedFile);return f})());await api('artworks','POST',{userId:currentUser.id,title:t,description:d,type:ty,tags,imagePath:u.path,gradient:GRADIENTS[Math.floor(Math.random()*GRADIENTS.length)]});notify('Опубликовано','success');document.getElementById('artTitle').value='';document.getElementById('artDescription').value='';document.getElementById('artTags').value='';removePreview();navigateTo('feed')}catch(e){notify(e.message,'warning')}finally{btn.textContent='Опубликовать';btn.disabled=false}}
+const ua=document.getElementById('uploadArea'); ua?.addEventListener('dragover',e=>{e.preventDefault();ua.classList.add('dragover')}); ua?.addEventListener('dragleave',()=>ua.classList.remove('dragover')); ua?.addEventListener('drop',e=>{e.preventDefault();ua.classList.remove('dragover');if(e.dataTransfer.files.length){document.getElementById('fileInput').files=e.dataTransfer.files;document.getElementById('fileInput').dispatchEvent(new Event('change'))}});
+
+function openDonate(id){donateArtworkId=id;document.getElementById('donateModal').classList.add('show');document.body.style.overflow='hidden'}
+function selectDonate(amt,btn){donateAmount=amt;document.getElementById('customDonate').value='';document.querySelectorAll('.donate-amount').forEach(b=>b.classList.remove('selected'));if(btn)btn.classList.add('selected')}
+async function processDonate(){const c=parseInt(document.getElementById('customDonate').value)||donateAmount;if(!c||c<=0)return notify('Выберите сумму','warning');await api(`artworks/${donateArtworkId}`,'POST',{type:'donate',amount:c});closeModal('donateModal');notify(`Донат ${c} ₽ отправлен`,'success')}
+
+function renderExplore(){document.getElementById('exploreCategories').innerHTML=Object.entries(TYPES).map(([k,t])=>`<div class="cat-card" onclick="navigateTo('feed');setTimeout(()=>filterFeed('${k}'),50)"><div class="cat-icon">${k}</div><div class="cat-name">${t.name}</div></div>`).join('');document.getElementById('criteriaGrid').innerHTML=Object.entries(TYPES).map(([k,t])=>`<div class="crit-item"><h4>${t.name}</h4><p style="color:var(--success);font-size:0.7rem;font-weight:600;margin:0.3rem 0">ОБЪЕКТИВНЫЕ</p>${t.objective.map(x=>`• ${x}`).join('<br>')}<p style="color:var(--accent);font-size:0.7rem;font-weight:600;margin:0.5rem 0 0.3rem">СУБЪЕКТИВНЫЕ</p>${t.subjective.map(x=>`• ${x}`).join('<br>')}</div>`).join('')}
+
+async function loadProfile(){if(!currentUser)return navigateTo('login');try{const{user,artworks:arts}=await api(`user/${currentUser.id}`);currentUser={...currentUser,...user};localStorage.setItem('artback_session',JSON.stringify(currentUser));const likes=arts.reduce((s,a)=>s+(a.likes||0),0);const views=arts.reduce((s,a)=>s+(a.views||0),0);const don=arts.reduce((s,a)=>s+(a.total_donated||0),0);document.getElementById('profileContent').innerHTML=`<div class="profile-header"><div class="profile-banner"></div><div class="profile-avatar-lg">${user.name[0]}</div><div class="profile-info"><h1>${user.name}</h1><div class="username">${user.username}</div><div class="bio">${user.bio||'Нет описания'}</div><div class="profile-stats"><div><div class="stat-val">${arts.length}</div><div class="stat-label">Работ</div></div><div><div class="stat-val">${likes}</div><div class="stat-label">Лайков</div></div><div><div class="stat-val">${views}</div><div class="stat-label">Просмотров</div></div><div><div class="stat-val">₽${don}</div><div class="stat-label">Донатов</div></div></div><div class="profile-tags"><span class="tag">${TYPES[user.art_type]?.name||user.art_type}</span></div><div class="profile-actions"><button class="btn btn-sm btn-secondary" onclick="editBio()">Редактировать</button></div></div></div><div class="profile-tabs"><button class="tab active" onclick="switchTab('w',this)">Работы</button><button class="tab" onclick="switchTab('r',this)">Оценки</button></div><div id="tabContent">${arts.length?`<div class="grid-works">${arts.map(a=>`<div class="work-thumb" onclick="openArt('${a.id}')"><div style="width:100%;height:100%;background:${a.gradient};display:flex;align-items:center;justify-content:center">${a.image_path?`<img src="/${a.image_path}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentElement.innerHTML='Изображение'">`:'Изображение'}</div><div class="overlay"><h4>${a.title}</h4><div class="mini"><span>❤️ ${a.likes||0}</span><span>👁️ ${a.views||0}</span></div></div></div>`).join('')}</div>`:'<div class="empty-state"><div class="empty-icon">Пусто</div><p>Загрузите первую работу</p></div>'}</div>`;}catch(e){notify('Ошибка','warning')}}
+function editBio(){const b=prompt('О себе:',currentUser.bio||'');if(b===null)return;api(`user/${currentUser.id}/bio`,'PUT',{bio:b.trim()}).then(()=>{currentUser.bio=b.trim();localStorage.setItem('artback_session',JSON.stringify(currentUser));loadProfile();notify('Обновлено','success')}).catch(()=>notify('Ошибка','warning'))}
+function switchTab(t,btn){document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.getElementById('tabContent').innerHTML=t==='w'?'<div class="empty-state"><div class="empty-icon">В разработке</div></div>':'<div class="empty-state"><div class="empty-icon">В разработке</div></div>'}
+function updateCriteria(){const t=document.getElementById('artType')?.value;const i=document.getElementById('uploadCriteriaInfo');if(!t||!TYPES[t]){i.innerHTML='';return}i.innerHTML=`<p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem"><strong style="color:var(--text-primary)">Параметры для "${TYPES[t].name}":</strong></p><p style="font-size:0.7rem;color:var(--success)">Объективные: ${TYPES[t].objective.join(', ')}</p><p style="font-size:0.7rem;color:var(--accent)">Субъективные: ${TYPES[t].subjective.join(', ')}</p>`}
+
+function notify(text,type='info'){const n=document.getElementById('notification');n.querySelector('.notif-text').textContent=text;n.className=`notification ${type} show`;setTimeout(()=>n.classList.remove('show'),3000)}
+document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o){o.classList.remove('show');document.body.style.overflow=''}}));
+document.addEventListener('click',e=>{if(!e.target.closest('.user-menu'))document.getElementById('userDropdown')?.classList.remove('show')});
+init();
