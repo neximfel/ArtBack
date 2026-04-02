@@ -2,3 +2,4 @@ node_modules/
 artback.db
 uploads/
 *.log
+.DS_Store

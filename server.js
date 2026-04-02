@@ -7,7 +7,7 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === ГЛОБАЛЬНЫЙ ПЕРЕХВАТ ОШИБОК (чтобы Render точно показал их в логах) ===
+// === ГЛОБАЛЬНЫЙ ПЕРЕХВАТ ОШИБОК ===
 process.on('uncaughtException', (err) => console.error('💥 UNCAUGHT:', err));
 process.on('unhandledRejection', (err) => console.error('🚫 UNHANDLED REJECTION:', err));
 app.use((err, req, res, next) => {
@@ -22,12 +22,10 @@ const db = new sqlite3.Database(dbPath, (err) => {
   else console.log('✅ SQLite connected:', dbPath);
 });
 
-// Промисификация для удобства
 const run = (sql, params = []) => new Promise((res, rej) => db.run(sql, params, function(err) { err ? rej(err) : res(this); }));
 const get = (sql, params = []) => new Promise((res, rej) => db.get(sql, params, (err, row) => err ? rej(err) : res(row)));
 const all = (sql, params = []) => new Promise((res, rej) => db.all(sql, params, (err, rows) => err ? rej(err) : res(rows)));
 
-// Инициализация таблиц
 async function initDB() {
   console.log('📦 Initializing tables...');
   await run(`CREATE TABLE IF NOT EXISTS users (
@@ -58,16 +56,42 @@ async function initDB() {
   const count = await get('SELECT COUNT(*) as c FROM users');
   if (count.c === 0) {
     console.log('🌱 Inserting demo data...');
-    await run(`INSERT INTO users VALUES ('demo1','Алиса Краскова','@alice_art','alice@demo.com','demo123','digital','Цифровой художник','#6366f1',CURRENT_TIMESTAMP)`);
-    await run(`INSERT INTO users VALUES ('demo2','Максим Творцов','@max_create','max@demo.com','demo123','photography','Пейзажный фотограф','#0ea5e9',CURRENT_TIMESTAMP)`);
-    await run(`INSERT INTO artworks VALUES ('a1','demo1','Дракон над горами','Концепт-арт для студии','digital','["фэнтези","концепт"]',142,1250,3500,'','linear-gradient(135deg,#3b82f6,#1e3a8a)',CURRENT_TIMESTAMP)`);
-    await run(`INSERT INTO artworks VALUES ('a2','demo2','Рассвет в Альпах','Снято на Canon R5','photography','["пейзаж","горы"]',98,890,2100,'','linear-gradient(135deg,#059669,#065f46)',CURRENT_TIMESTAMP)`);
+    
+    // Демо-пользователи
+    await run(`INSERT INTO users VALUES ('demo1','Алиса Краскова','@alice_art','alice@demo.com','demo123','digital','Цифровой художник и концепт-артист. Работаю в Photoshop и Procreate.','#6366f1',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO users VALUES ('demo2','Максим Творцов','@max_create','max@demo.com','demo123','photography','Пейзажный фотограф. Снимаю на Canon R5.','#0ea5e9',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO users VALUES ('demo3','Юлия Иллюстраторова','@julia_draws','julia@demo.com','demo123','illustration','Иллюстратор детских книг. Люблю акварель и цифру.','#10b981',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO users VALUES ('demo4','Денис 3D','@denis_3d','denis@demo.com','demo123','3d','3D-художник. Создаю модели в Blender.','#f59e0b',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO users VALUES ('demo5','Анна Аниматор','@anna_motion','anna@demo.com','demo123','animation','Аниматор. Делаю короткие ролики в After Effects.','#ef4444',CURRENT_TIMESTAMP)`);
+
+    // Демо-работы (8 штук)
+    await run(`INSERT INTO artworks VALUES ('a1','demo1','Дракон над горами','Концепт-арт для игровой студии. Нарисовано в Photoshop за 8 часов. Вдохновлена работами Алана Ли.','digital','["фэнтези","концепт","цифра"]',142,1250,3500,'','linear-gradient(135deg,#3b82f6,#1e3a8a)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a2','demo2','Рассвет в Альпах','Снято на Canon R5 с объективом 24-70mm. Золотой час в швейцарских Альпах — невероятное зрелище.','photography','["пейзаж","горы","природа"]',98,890,2100,'','linear-gradient(135deg,#059669,#065f46)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a3','demo3','Маленький волшебник','Иллюстрация для обложки детской книги о мальчике, который нашёл волшебную палочку. Акварель + цифровая доработка.','illustration','["книга","персонаж","сказка"]',215,2100,5200,'','linear-gradient(135deg,#d97706,#92400e)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a4','demo4','Киберпанк город','3D-сцена ночного города в стиле киберпанк. Создано в Blender с использованием Cycles рендера.','3d','["киберпанк","город","научная фантастика"]',178,1560,4100,'','linear-gradient(135deg,#6366f1,#4338ca)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a5','demo1','Портрет эльфийки','Детальный портрет в стиле фэнтези. Акцент на глаза и волосы — использовала кастомные кисти для текстуры.','digital','["портрет","эльф","фэнтези"]',203,1890,4800,'','linear-gradient(135deg,#118ab2,#065f46)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a6','demo2','Туманный лес','Мистическая атмосфера утреннего тумана в осеннем лесу. Снято на 50mm объектив с длинной выдержкой.','photography','["лес","туман","осень"]',134,1100,2800,'','linear-gradient(135deg,#2d6a4f,#1e293b)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a7','demo3','Лесная фея','Иллюстрация для серии открыток. Фея, которая прячется среди цветов. Использовала акварель и цифровую доработку.','illustration','["фея","природа","открытка"]',189,1650,3900,'','linear-gradient(135deg,#ec4899,#be185d)',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO artworks VALUES ('a8','demo4','Космический корабль','3D-модель исследовательского корабля для инди-игры. Низкополигональный стиль с ручной прорисовкой текстур.','3d','["космос","корабль","игра"]',156,1320,3200,'','linear-gradient(135deg,#7c3aed,#4c1d95)',CURRENT_TIMESTAMP)`);
+
+    // Демо-оценки
     await run(`INSERT INTO ratings VALUES ('r1','a1','demo2','{"technique":9,"composition":8,"color":9,"lighting":8,"vibe":10,"originality":8}',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO ratings VALUES ('r2','a1','demo3','{"technique":8,"composition":9,"color":8,"lighting":7,"vibe":9,"originality":9}',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO ratings VALUES ('r3','a2','demo1','{"exposure":9,"focus":8,"composition":10,"timing":9,"vibe":10,"storytelling":8}',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO ratings VALUES ('r4','a3','demo4','{"line":9,"narrative":8,"character":10,"style":9,"vibe":10,"charm":10}',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO ratings VALUES ('r5','a4','demo1','{"topology":8,"texturing":9,"lighting":10,"render":9,"vibe":9,"creativity":8}',CURRENT_TIMESTAMP)`);
+
+    // Демо-комментарии
+    await run(`INSERT INTO comments VALUES ('c1','a1','demo2','Потрясающая работа с освещением и глубиной сцены. Дракон выглядит невероятно живым!',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO comments VALUES ('c2','a1','demo3','Обожаю цветовую палитру! Облака просто шедевральные.',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO comments VALUES ('c3','a2','demo1','Какая красота! Мечтаю побывать там. Какой объектив использовали?',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO comments VALUES ('c4','a3','demo4','Персонаж очень милый! Дети точно оценят эту иллюстрацию.',CURRENT_TIMESTAMP)`);
+    await run(`INSERT INTO comments VALUES ('c5','a4','demo3','Невероятная детализация! Сколько времени ушло на рендер?',CURRENT_TIMESTAMP)`);
   }
   console.log('✅ DB ready');
 }
 
-// Гарантированное создание папки uploads
+// === ЗАГРУЗКА ФАЙЛОВ ===
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -85,10 +109,11 @@ const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 // === MIDDLEWARE ===
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(uploadDir));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// === API ===
+// === API: Auth ===
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -114,6 +139,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+// === API: Artworks ===
 app.get('/api/artworks', async (req, res) => {
   try {
     const type = req.query.type;
@@ -192,34 +218,24 @@ app.post('/api/artworks/:id', async (req, res) => {
     res.status(400).json({ error: 'Unknown action' });
   } catch(e) { console.error('ART ACTION ERR:', e); res.status(500).json({ error: e.message }); }
 });
-// DELETE artwork
+
 app.delete('/api/artworks/:id', async (req, res) => {
   try {
     const { userId } = req.body;
     const artId = req.params.id;
-    
-    // Проверка владельца
     const art = await get('SELECT user_id, image_path FROM artworks WHERE id=?', [artId]);
     if (!art) return res.status(404).json({ error: 'Работа не найдена' });
     if (art.user_id !== userId) return res.status(403).json({ error: 'Только владелец может удалить работу' });
-    
-    // Удаление файла (если есть)
     if (art.image_path && art.image_path.startsWith('/uploads/')) {
       const filePath = path.join(__dirname, art.image_path);
       try { fs.unlinkSync(filePath); } catch(e) { console.log('File not found:', filePath); }
     }
-    
-    // Удаление связанных записей
     await run('DELETE FROM ratings WHERE artwork_id=?', [artId]);
     await run('DELETE FROM comments WHERE artwork_id=?', [artId]);
     await run('DELETE FROM likes WHERE artwork_id=?', [artId]);
     await run('DELETE FROM artworks WHERE id=?', [artId]);
-    
     res.json({ ok: true });
-  } catch(e) {
-    console.error('DELETE ART ERR:', e);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { console.error('DELETE ART ERR:', e); res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/upload', upload.single('image'), (req, res) => {
@@ -245,7 +261,6 @@ app.put('/api/user/:id/bio', async (req, res) => {
 
 app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// === ЗАПУСК ===
 initDB().then(() => {
   app.listen(PORT, () => console.log(`🚀 ArtBack running on port ${PORT}`));
 }).catch(err => {
