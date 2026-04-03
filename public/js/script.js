@@ -198,7 +198,7 @@ async function openArt(artId) {
     }
     
     const { art, ratings, comments } = response;
-    const avg = art.avgRating || 0;
+    const avg = Number(art.avgRating || 0);
     
     const img = art.image_url 
       ? `<img src="${art.image_url}" style="width:100%;max-height:320px;object-fit:contain;background:#000;border-radius:var(--radius)" onerror="this.outerHTML='<div style=\\'width:100%;height:280px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7)\\'>${TYPES[art.type]?.name||'Изображение'}</div>'">` 
