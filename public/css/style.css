@@ -237,7 +237,7 @@ textarea{resize:vertical;min-height:80px}
   border-radius:50%;
   border:4px solid var(--bg-card);
   position: absolute;
-  top: 160px; /* 🔧 ИЗМЕНЕНО: было bottom: -45px */
+  top: 120px; /* 🔧 ИЗМЕНЕНО: было bottom: -45px */
   left: 50%;
   transform: translateX(-50%);
   background:var(--gradient-main);
