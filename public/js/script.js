@@ -339,7 +339,28 @@ async function processDonate() {
 function renderExplore() {
   const catContainer = document.getElementById('exploreCategories');
   if (catContainer) {
-    catContainer.innerHTML = Object.entries(TYPES).map(([key, t]) => `<div class="cat-card" onclick="navigateTo('feed');setTimeout(()=>filterFeed('${key}'),50)"><div class="cat-icon">${key==='3d'?'🧊':key==='digital'?'🖥️':key==='traditional'?'🎨':key==='illustration'?'✏️':key==='photography'?'📷':''}</div><div class="cat-name">${t.name}</div><div class="cat-count">${t.objective.length} объективных • ${t.subjective.length} субъективных</div></div>`).join('');
+    catContainer.innerHTML = Object.entries(TYPES).map(([key, t]) => `
+      <div class="cat-card" onclick="navigateTo('feed');setTimeout(()=>filterFeed('${key}'),50)">
+        <div class="cat-icon">${key==='3d'?'🧊':key==='digital'?'🖥️':key==='traditional'?'🎨':key==='illustration'?'✏️':key==='photography'?'📷':key==='animation'?'🎬':'🎨'}</div>
+        <div class="cat-name">${t.name}</div>
+        <div class="cat-count">${t.objective.length} объективных • ${t.subjective.length} субъективных</div>
+      </div>
+    `).join('');
+  }
+  
+  const critContainer = document.getElementById('criteriaGrid');
+  if (critContainer) {
+    critContainer.innerHTML = Object.entries(TYPES).map(([key, t]) => `
+      <div class="crit-item">
+        <h4>${key==='3d'?'🧊':key==='digital'?'🖥️':key==='traditional'?'🎨':key==='illustration'?'✏️':key==='photography'?'📷':key==='animation'?'🎬':'🎨'} ${t.name}</h4>
+        
+        <p style="color:var(--success);font-size:0.75rem;font-weight:600;margin:0.5rem 0 0.3rem">📐 ОБЪЕКТИВНЫЕ ПАРАМЕТРЫ</p>
+        ${t.objective.map(x => `<div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.2rem;padding:0.2rem 0;border-left:2px solid var(--success);padding-left:0.5rem">• ${x.name}</div>`).join('')}
+        
+        <p style="color:var(--accent);font-size:0.75rem;font-weight:600;margin:0.6rem 0 0.3rem">💭 СУБЪЕКТИВНЫЕ ПАРАМЕТРЫ</p>
+        ${t.subjective.map(x => `<div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.2rem;padding:0.2rem 0;border-left:2px solid var(--accent);padding-left:0.5rem">• ${x.name}</div>`).join('')}
+      </div>
+    `).join('');
   }
 }
 
