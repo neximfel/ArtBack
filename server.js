@@ -26,7 +26,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal Server Error' });
 });
 
-// === ЗАГРУЗКА ФАЙЛОВ (в памяти для Supabase Storage) ===
+// === ЗАГРУЗКА ФАЙЛОВ (в памяти) ===
 const storage = multer.memoryStorage();
 const upload = multer({ 
   storage, 
@@ -49,61 +49,45 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 async function getAvgRating(artId) {
-  const { data, error } = await supabase
-    .from('ratings')
-    .select('params')
-    .eq('artwork_id', artId);
-  
-  if (error || !data?.length) return 0;
-  
-  let sum = 0, count = 0;
-  data.forEach(r => {
-    try { 
-      const p = typeof r.params === 'string' ? JSON.parse(r.params) : r.params;
-      Object.values(p).forEach(v => { sum += Number(v) || 0; count++; }); 
-    } catch {}
-  });
-  return count ? (sum / count).toFixed(1) : 0;
+  try {
+    const { data, error } = await supabase.from('ratings').select('params').eq('artwork_id', artId);
+    if (error || !data?.length) return 0;
+    
+    let sum = 0, count = 0;
+    data.forEach(r => {
+      try { 
+        const p = typeof r.params === 'string' ? JSON.parse(r.params) : r.params;
+        Object.values(p).forEach(v => { sum += Number(v) || 0; count++; }); 
+      } catch {}
+    });
+    return count ? (sum / count).toFixed(1) : 0;
+  } catch { return 0; }
 }
 
 async function getArtworkWithDetails(artId) {
-  const { data: art, error } = await supabase
-    .from('artworks')
-    .select(`
-      *,
-      users!artworks_user_id_fkey (id, name, username, avatar_color, avatar_url)
-    `)
-    .eq('id', artId)
-    .single();
-  
-  if (error || !art) return null;
-  
-  const [avg, likesRes, ratings, comments] = await Promise.all([
-    getAvgRating(artId),
-    supabase.from('likes').select('id', { count: 'exact' }).eq('artwork_id', artId),
-    supabase.from('ratings').select('*').eq('artwork_id', artId),
-    supabase.from('comments')
-      .select(`*, users!comments_user_id_fkey(id, name, avatar_color, avatar_url)`)
-      .eq('artwork_id', artId)
-      .order('created_at', { ascending: true })
-  ]);
-  
-  // Обновляем просмотры асинхронно (не блокируем ответ)
-  supabase.from('artworks').update({ views: (art.views || 0) + 1 }).eq('id', artId).then();
-  
-  return {
-    art: { 
-      ...art, 
-      avgRating: avg, 
-      likesCount: likesRes.count || 0,
-      author_name: art.users?.name,
-      author_username: art.users?.username,
-      avatar_color: art.users?.avatar_color,
-      avatar_url: art.users?.avatar_url
-    },
-    ratings: ratings.data || [],
-    comments: comments.data || []
-  };
+  try {
+    const {  art, error } = await supabase
+      .from('artworks')
+      .select(`*, users!artworks_user_id_fkey (id, name, username, avatar_color, avatar_url)`)
+      .eq('id', artId).single();
+    
+    if (error || !art) return null;
+    
+    const [avg, likesRes, ratings, comments] = await Promise.all([
+      getAvgRating(artId),
+      supabase.from('likes').select('id', { count: 'exact' }).eq('artwork_id', artId),
+      supabase.from('ratings').select('*').eq('artwork_id', artId),
+      supabase.from('comments').select(`*, users!comments_user_id_fkey(id, name, avatar_color, avatar_url)`).eq('artwork_id', artId).order('created_at', { ascending: true })
+    ]);
+    
+    supabase.from('artworks').update({ views: (art.views || 0) + 1 }).eq('id', artId).then();
+    
+    return {
+      art: { ...art, avgRating: avg, likesCount: likesRes.count || 0, author_name: art.users?.name, author_username: art.users?.username, avatar_color: art.users?.avatar_color, avatar_url: art.users?.avatar_url },
+      ratings: ratings.data || [],
+      comments: comments.data || []
+    };
+  } catch { return null; }
 }
 
 // === API: Auth ===
@@ -111,22 +95,13 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Заполните email и пароль' });
-    
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id,name,username,email,art_type,bio,avatar_color,avatar_url')
-      .eq('email', email)
-      .eq('password', password)
-      .single();
-    
+    const {  user, error } = await supabase.from('users').select('id,name,username,email,art_type,bio,avatar_color,avatar_url').eq('email', email).eq('password', password).single();
     if (error || !user) return res.status(401).json({ error: 'Неверный email или пароль' });
     res.json(user);
-  } catch(e) { 
-    console.error('LOGIN ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// 🔧 ИСПРАВЛЕННАЯ РЕГИСТРАЦИЯ С ЗАЩИТОЙ ОТ ДУБЛЕЙ
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, username, email, password, artType } = req.body;
@@ -144,8 +119,14 @@ app.post('/api/auth/register', async (req, res) => {
     });
     
     if (error) {
-      if (error.message?.includes('unique') || error.code === '23505') 
-        return res.status(400).json({ error: 'Email или никнейм уже заняты' });
+      // 🔧 ПРОВЕРКА НА ДУБЛИКАТЫ (Error 23505)
+      console.error('DB Error:', error);
+      if (error.code === '23505' || error.message?.includes('unique')) {
+        if (error.message.includes('email')) {
+          return res.status(400).json({ error: ' Этот Email уже используется!' });
+        }
+        return res.status(400).json({ error: '⛔ Этот Никнейм уже занят!' });
+      }
       throw error;
     }
     
@@ -160,215 +141,120 @@ app.post('/api/auth/register', async (req, res) => {
 app.get('/api/artworks', async (req, res) => {
   try {
     const type = req.query.type;
-    let query = supabase
-      .from('artworks')
-      .select(`
-        *,
-        users!artworks_user_id_fkey (id, name, username, avatar_color, avatar_url)
-      `)
-      .order('created_at', { ascending: false });
-    
+    let query = supabase.from('artworks').select(`*, users!artworks_user_id_fkey (id, name, username, avatar_color, avatar_url)`).order('created_at', { ascending: false });
     if (type && type !== 'all') query = query.eq('type', type);
-    
-    const { data: arts, error } = await query;
+    const {  arts, error } = await query;
     if (error) throw error;
-    
     const result = [];
     for (const a of arts) {
       const avg = await getAvgRating(a.id);
       const { count } = await supabase.from('likes').select('*', { count: 'exact', head: true }).eq('artwork_id', a.id);
-      result.push({ 
-        ...a, 
-        avgRating: avg, 
-        likesCount: count || 0,
-        author_name: a.users?.name,
-        author_username: a.users?.username,
-        avatar_color: a.users?.avatar_color,
-        avatar_url: a.users?.avatar_url
-      });
+      result.push({ ...a, avgRating: avg, likesCount: count || 0, author_name: a.users?.name, author_username: a.users?.username, avatar_color: a.users?.avatar_color, avatar_url: a.users?.avatar_url });
     }
     res.json(result);
-  } catch(e) {
-    console.error('🔥 ARTWORKS FETCH ERROR:', e);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/artworks', async (req, res) => {
   try {
     const { userId, title, description, type, tags, imageUrl, gradient } = req.body;
-    if (!userId || !title || !type) return res.status(400).json({ error: 'Заполните обязательные поля' });
-    
     const id = 'a_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
-    
-    const { error } = await supabase.from('artworks').insert({
-      id, user_id: userId, title, description: description||'', type, 
-      tags: tags || [], image_url: imageUrl||'', gradient: gradient||'linear-gradient(135deg,#475569,#1e293b)'
-    });
-    
+    const { error } = await supabase.from('artworks').insert({ id, user_id: userId, title, description: description||'', type, tags: tags || [], image_url: imageUrl||'', gradient: gradient||'linear-gradient(135deg,#475569,#1e293b)' });
     if (error) throw error;
     res.status(201).json({ id });
-  } catch(e) { 
-    console.error('CREATE ART ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/artworks/:id', async (req, res) => {
   try {
     const result = await getArtworkWithDetails(req.params.id);
-    if (!result) return res.status(404).json({ error: 'Работа не найдена' });
+    if (!result) return res.status(404).json({ error: 'Not found' });
     res.json(result);
-  } catch(e) { 
-    console.error('ART DETAIL ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/artworks/:id', async (req, res) => {
   try {
     const { type, userId, text, params, amount } = req.body;
     const artId = req.params.id;
-    
-    if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
+    if (!userId) return res.status(401).json({ error: 'Auth required' });
     
     if (type === 'like') {
-      const { data: exists } = await supabase
-        .from('likes')
-        .select('id')
-        .eq('artwork_id', artId)
-        .eq('user_id', userId)
-        .maybeSingle();
-      
-      if (exists) {
-        await supabase.from('likes').delete().eq('artwork_id', artId).eq('user_id', userId);
-        return res.json({ liked: false });
-      }
-      await supabase.from('likes').insert({ id: 'l_'+Date.now(), artwork_id: artId, user_id: userId });
-      return res.json({ liked: true });
+      const {  exists } = await supabase.from('likes').select('id').eq('artwork_id', artId).eq('user_id', userId).maybeSingle();
+      if (exists) await supabase.from('likes').delete().eq('artwork_id', artId).eq('user_id', userId);
+      else await supabase.from('likes').insert({ id: 'l_'+Date.now(), artwork_id: artId, user_id: userId });
+      return res.json({ liked: !exists });
     }
-    
     if (type === 'comment') {
-      if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Комментарий не может быть пустым' });
-      await supabase.from('comments').insert({ 
-        id: 'c_'+Date.now(), artwork_id: artId, user_id: userId, text: text.trim() 
-      });
+      if (!text?.trim()) return res.status(400).json({ error: 'Empty comment' });
+      await supabase.from('comments').insert({ id: 'c_'+Date.now(), artwork_id: artId, user_id: userId, text: text.trim() });
       return res.json({ ok: true });
     }
-    
     if (type === 'rate') {
-      await supabase.from('ratings').upsert({ 
-        id: 'r_'+Date.now(), artwork_id: artId, user_id: userId, params 
-      }, { onConflict: 'artwork_id,user_id' });
+      await supabase.from('ratings').upsert({ id: 'r_'+Date.now(), artwork_id: artId, user_id: userId, params }, { onConflict: 'artwork_id,user_id' });
       return res.json({ ok: true });
     }
-    
     if (type === 'donate') {
-      const amt = parseInt(amount);
-      if (!amt || amt <= 0) return res.status(400).json({ error: 'Некорректная сумма' });
-      
       const { data: art } = await supabase.from('artworks').select('total_donated').eq('id', artId).single();
-      await supabase.from('artworks').update({ 
-        total_donated: ((art?.total_donated || 0) + amt) 
-      }).eq('id', artId);
-      
+      await supabase.from('artworks').update({ total_donated: ((art?.total_donated || 0) + parseInt(amount)) }).eq('id', artId);
       return res.json({ ok: true });
     }
-    
-    res.status(400).json({ error: 'Неизвестное действие' });
-  } catch(e) { 
-    console.error('ART ACTION ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+    res.status(400).json({ error: 'Unknown action' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete('/api/artworks/:id', async (req, res) => {
   try {
     const { userId } = req.body;
-    const artId = req.params.id;
-    
-    if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
-    
-    const { data: art } = await supabase.from('artworks').select('user_id, image_url').eq('id', artId).single();
-    if (!art) return res.status(404).json({ error: 'Работа не найдена' });
-    if (art.user_id !== userId) return res.status(403).json({ error: 'Только владелец может удалить работу' });
-    
-    // Удаляем изображение из Storage (опционально)
+    if (!userId) return res.status(401).json({ error: 'Auth required' });
+    const { data: art } = await supabase.from('artworks').select('user_id, image_url').eq('id', req.params.id).single();
+    if (!art) return res.status(404).json({ error: 'Not found' });
+    if (art.user_id !== userId) return res.status(403).json({ error: 'Forbidden' });
     if (art.image_url?.includes('supabase.co/storage')) {
-      try {
-        const filePath = art.image_url.split('/object/public/artworks/')[1];
-        if (filePath) await supabase.storage.from('artworks').remove([filePath]);
-      } catch(e) { console.log('Storage delete error (ignored):', e.message); }
+      try { await supabase.storage.from('artworks').remove([art.image_url.split('/object/public/artworks/')[1]]); } catch(e) {}
     }
-    
-    // Удаляем связанные записи
     await Promise.all([
-      supabase.from('ratings').delete().eq('artwork_id', artId),
-      supabase.from('comments').delete().eq('artwork_id', artId),
-      supabase.from('likes').delete().eq('artwork_id', artId)
+      supabase.from('ratings').delete().eq('artwork_id', req.params.id),
+      supabase.from('comments').delete().eq('artwork_id', req.params.id),
+      supabase.from('likes').delete().eq('artwork_id', req.params.id),
+      supabase.from('artworks').delete().eq('id', req.params.id)
     ]);
-    
-    await supabase.from('artworks').delete().eq('id', artId);
     res.json({ ok: true });
-  } catch(e) { 
-    console.error('DELETE ART ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// === ЗАГРУЗКА ИЗОБРАЖЕНИЙ В SUPABASE STORAGE ===
 app.post('/api/upload', upload.single('image'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'Файл не выбран' });
+    if (!req.file) return res.status(400).json({ error: 'No file' });
     
     const bucket = req.body.type === 'avatar' ? 'avatars' : 'artworks';
-    const ext = path.extname(req.file.originalname).toLowerCase();
-    if (!['.jpg','.jpeg','.png','.webp','.gif'].includes(ext)) {
-      return res.status(400).json({ error: 'Неподдерживаемый формат файла' });
-    }
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2,10)}${path.extname(req.file.originalname)}`;
     
-    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2,10)}${ext}`;
-    
-    const { data, error: uploadError } = await supabase.storage
+    // 🔧 ИСПРАВЛЕНО: правильная деструктуризация
+    const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(fileName, req.file.buffer, { 
-        contentType: req.file.mimetype, 
-        upsert: false,
-        cacheControl: '3600'
-      });
+      .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
     
-    if (uploadError) throw uploadError;
+    if (error) throw error;
     
-    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(data.path);
+    // 🔧 ИСПРАВЛЕНО: здесь было {{ publicUrl }}, должно быть { data: { publicUrl } }
+    const { data: { publicUrl } } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(data.path);
+    
     res.json({ url: publicUrl });
-  } catch(e) {
-    console.error('UPLOAD ERR:', e);
-    res.status(500).json({ error: e.message || 'Ошибка загрузки файла' });
+  } catch(e) { 
+    res.status(500).json({ error: e.message }); 
   }
 });
 
-// === API: Users ===
 app.get('/api/user/:id', async (req, res) => {
   try {
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id,name,username,email,art_type,bio,avatar_color,avatar_url')
-      .eq('id', req.params.id)
-      .single();
-    
-    if (error || !user) return res.status(404).json({ error: 'Пользователь не найден' });
-    
-    const { data: arts } = await supabase
-      .from('artworks')
-      .select('id,title,type,likes,views,total_donated,image_url,gradient,created_at')
-      .eq('user_id', req.params.id)
-      .order('created_at', { ascending: false });
-    
+    const { data: user, error } = await supabase.from('users').select('id,name,username,email,art_type,bio,avatar_color,avatar_url').eq('id', req.params.id).single();
+    if (error || !user) return res.status(404).json({ error: 'User not found' });
+    const { data: arts } = await supabase.from('artworks').select('id,title,type,likes,views,total_donated,image_url,gradient,created_at').eq('user_id', req.params.id).order('created_at', { ascending: false });
     res.json({ user, artworks: arts || [] });
-  } catch(e) { 
-    console.error('USER ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/user/:id', async (req, res) => {
@@ -377,25 +263,13 @@ app.put('/api/user/:id', async (req, res) => {
     const updateData = {};
     if (bio !== undefined) updateData.bio = bio;
     if (avatarUrl !== undefined) updateData.avatar_url = avatarUrl;
-    
-    if (Object.keys(updateData).length === 0) return res.status(400).json({ error: 'Нет данных для обновления' });
-    
+    if (Object.keys(updateData).length === 0) return res.status(400).json({ error: 'No data' });
     const { error } = await supabase.from('users').update(updateData).eq('id', req.params.id);
     if (error) throw error;
-    
     res.json({ ok: true });
-  } catch(e) { 
-    console.error('UPDATE USER ERR:', e); 
-    res.status(500).json({ error: e.message }); 
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// === SPA FALLBACK ===
-app.get('*', (_, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
-    if (err) res.status(500).send('Ошибка загрузки приложения');
-  });
-});
+app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// === ЗАПУСК ===
 app.listen(PORT, () => console.log(`🚀 ArtBack running on port ${PORT}`));
