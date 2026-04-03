@@ -74,9 +74,9 @@ app.get('/api/artworks', async (req, res) => {
     
     const type = req.query.type;
     let query = supabase.from('artworks').select(`
-      *,
-      users!artworks_user_id_fkey (id, name, username, avatar_color, avatar_url)
-    `).order('created_at', { ascending: false });
+  *,
+  users (id, name, username, avatar_color, avatar_url)
+`).order('created_at', { ascending: false });
     
     if (type && type !== 'all') {
       query = query.eq('type', type);
@@ -203,10 +203,37 @@ app.post('/api/artworks', async (req, res) => {
 app.get('/api/artworks/:id', async (req, res) => {
   try {
     const {  art, error } = await supabase
-      .from('artworks')
-      .select(`*, users!artworks_user_id_fkey (id, name, username, avatar_color, avatar_url)`)
-      .eq('id', req.params.id)
-      .single();
+  .from('artworks')
+  .select(`
+    *,
+    users (id, name, username, avatar_color, avatar_url)
+  `)
+  .eq('id', req.params.id)
+  .single();
+if (error && error.code === 'PGRST116') {
+  const {  artOnly, error: err2 } = await supabase
+    .from('artworks')
+    .select('*')
+    .eq('id', req.params.id)
+    .single();
+  
+  if (err2 || !artOnly) return res.status(404).json({ error: 'Not found' });
+  
+  // Возвращаем работу без данных автора
+  return res.json({
+    art: { 
+      ...artOnly, 
+      author_name: 'Аноним',
+      author_username: '',
+      avatar_color: '#6366f1',
+      avatar_url: null
+    },
+    ratings: [],
+    comments: []
+  });
+}
+
+if (error || !art) return res.status(404).json({ error: 'Not found' });
     
     if (error || !art) return res.status(404).json({ error: 'Not found' });
     
