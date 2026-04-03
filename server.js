@@ -57,12 +57,12 @@ async function getAvgRating(artId) {
 
 // === API: ARTWORKS (LIST) ===
 // === API: ARTWORKS (LIST) — БЕЗОПАСНАЯ ВЕРСИЯ ===
+// === API: ARTWORKS (LIST) — ИСПРАВЛЕННАЯ ВЕРСИЯ ===
 app.get('/api/artworks', async (req, res) => {
   try {
     console.log('📥 GET /api/artworks - type:', req.query.type);
     const type = req.query.type;
     
-    // 🔧 Запрос БЕЗ JOIN к users
     let query = supabase.from('artworks').select('*').order('created_at', { ascending: false });
     if (type && type !== 'all') query = query.eq('type', type);
     
@@ -74,22 +74,25 @@ app.get('/api/artworks', async (req, res) => {
     
     if (!arts || arts.length === 0) return res.json([]);
     
-    // 🔧 Для каждой работы отдельно получаем автора
     const result = [];
     for (const a of arts) {
       const avg = await getAvgRating(a.id);
       const { count } = await supabase.from('likes').select('*', { count: 'exact', head: true }).eq('artwork_id', a.id);
       
-      // Отдельный запрос к users
+      // 🔧 БЕЗОПАСНЫЙ ЗАПРОС АВТОРА (без .catch после await)
       let authorData = { name: 'Аноним', username: '', avatar_color: '#6366f1', avatar_url: null };
       if (a.user_id) {
-        const {  user } = await supabase
-          .from('users')
-          .select('name, username, avatar_color, avatar_url')
-          .eq('id', a.user_id)
-          .single()
-          .catch(() => ({}));
-        if (user) authorData = user;
+        try {
+          const {  user } = await supabase
+            .from('users')
+            .select('name, username, avatar_color, avatar_url')
+            .eq('id', a.user_id)
+            .single();
+          if (user) authorData = user;
+        } catch (e) {
+          // Если автора нет или ошибка сети — оставляем дефолтные значения
+          console.warn('⚠️ Author fetch skipped for', a.id);
+        }
       }
       
       result.push({ 
@@ -223,7 +226,17 @@ app.post('/api/auth/register', async (req, res) => {
       }
       throw error;
     }
-    
+    // 🔧 Создаём пользователя в Supabase Auth (для RLS)
+const {  authUser, error: authError } = await supabase.auth.admin.createUser({
+  email,
+  password,
+  user_metadata: { name, username, art_type: artType||'digital' }
+});
+
+if (!authError && authUser?.user) {
+  // Привязываем auth_id к нашему пользователю
+  await supabase.from('users').update({ auth_id: authUser.user.id }).eq('id', id);
+}
     res.json({ id, name, username: cleanUsername, email, artType: artType||'digital', bio:'', avatar_color: color });
   } catch(e) {
     console.error('❌ Registration error:', e); 
