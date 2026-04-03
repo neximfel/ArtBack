@@ -56,16 +56,14 @@ async function getAvgRating(artId) {
 }
 
 // === API: ARTWORKS (LIST) ===
+// === API: ARTWORKS (LIST) — БЕЗОПАСНАЯ ВЕРСИЯ ===
 app.get('/api/artworks', async (req, res) => {
   try {
     console.log('📥 GET /api/artworks - type:', req.query.type);
     const type = req.query.type;
     
-    let query = supabase.from('artworks').select(`
-      *,
-      users (id, name, username, avatar_color, avatar_url)
-    `).order('created_at', { ascending: false });
-    
+    // 🔧 Запрос БЕЗ JOIN к users
+    let query = supabase.from('artworks').select('*').order('created_at', { ascending: false });
     if (type && type !== 'all') query = query.eq('type', type);
     
     const { data: arts, error } = await query;
@@ -76,18 +74,32 @@ app.get('/api/artworks', async (req, res) => {
     
     if (!arts || arts.length === 0) return res.json([]);
     
+    // 🔧 Для каждой работы отдельно получаем автора
     const result = [];
     for (const a of arts) {
       const avg = await getAvgRating(a.id);
       const { count } = await supabase.from('likes').select('*', { count: 'exact', head: true }).eq('artwork_id', a.id);
+      
+      // Отдельный запрос к users
+      let authorData = { name: 'Аноним', username: '', avatar_color: '#6366f1', avatar_url: null };
+      if (a.user_id) {
+        const {  user } = await supabase
+          .from('users')
+          .select('name, username, avatar_color, avatar_url')
+          .eq('id', a.user_id)
+          .single()
+          .catch(() => ({}));
+        if (user) authorData = user;
+      }
+      
       result.push({ 
         ...a, 
         avgRating: avg, 
         likesCount: count || 0,
-        author_name: a.users?.name || 'Аноним',
-        author_username: a.users?.username || '',
-        avatar_color: a.users?.avatar_color || '#6366f1',
-        avatar_url: a.users?.avatar_url
+        author_name: authorData.name,
+        author_username: authorData.username,
+        avatar_color: authorData.avatar_color,
+        avatar_url: authorData.avatar_url
       });
     }
     
@@ -100,49 +112,66 @@ app.get('/api/artworks', async (req, res) => {
 });
 
 // === API: ARTWORK (SINGLE) ===
+// === API: ARTWORK (SINGLE) — БЕЗОПАСНАЯ ВЕРСИЯ ===
 app.get('/api/artworks/:id', async (req, res) => {
   try {
     console.log('📥 GET /api/artworks/:id -', req.params.id);
     
-    const {  art, error } = await supabase
+    // 🔧 Шаг 1: Получаем работу БЕЗ JOIN к users
+    const {  artwork, error: artError } = await supabase
       .from('artworks')
-      .select(`
-        *,
-        users (id, name, username, avatar_color, avatar_url)
-      `)
+      .select('*')
       .eq('id', req.params.id)
       .single();
     
-    if (error || !art) {
-      console.error('❌ Artwork not found:', error);
+    if (artError || !artwork) {
+      console.error('❌ Artwork not found:', artError);
       return res.status(404).json({ error: 'Not found' });
     }
     
+    // 🔧 Шаг 2: Отдельно получаем данные автора (если есть)
+    let authorData = { name: 'Аноним', username: '', avatar_color: '#6366f1', avatar_url: null };
+    if (artwork.user_id) {
+      const {  user, error: userError } = await supabase
+        .from('users')
+        .select('id, name, username, avatar_color, avatar_url')
+        .eq('id', artwork.user_id)
+        .single();
+      
+      if (!userError && user) {
+        authorData = user;
+      }
+    }
+    
+    // 🔧 Шаг 3: Параллельно загружаем рейтинги, лайки, комментарии
     const [avg, likesRes, ratings, comments] = await Promise.all([
-      getAvgRating(art.id),
-      supabase.from('likes').select('id', { count: 'exact' }).eq('artwork_id', art.id),
-      supabase.from('ratings').select('*').eq('artwork_id', art.id),
+      getAvgRating(artwork.id),
+      supabase.from('likes').select('id', { count: 'exact' }).eq('artwork_id', artwork.id),
+      supabase.from('ratings').select('*').eq('artwork_id', artwork.id),
       supabase.from('comments')
         .select(`*, users (id, name, avatar_color, avatar_url)`)
-        .eq('artwork_id', art.id)
+        .eq('artwork_id', artwork.id)
         .order('created_at', { ascending: true })
     ]);
     
-    supabase.from('artworks').update({ views: (art.views || 0) + 1 }).eq('id', art.id).then();
+    // 🔧 Шаг 4: Асинхронно обновляем просмотры
+    supabase.from('artworks').update({ views: (artwork.views || 0) + 1 }).eq('id', artwork.id).then();
     
+    // 🔧 Шаг 5: Собираем ответ
     res.json({
       art: { 
-        ...art, 
+        ...artwork, 
         avgRating: avg, 
         likesCount: likesRes.count || 0,
-        author_name: art.users?.name || 'Аноним',
-        author_username: art.users?.username || '',
-        avatar_color: art.users?.avatar_color || '#6366f1',
-        avatar_url: art.users?.avatar_url
+        author_name: authorData.name,
+        author_username: authorData.username,
+        avatar_color: authorData.avatar_color,
+        avatar_url: authorData.avatar_url
       },
       ratings: ratings.data || [],
       comments: comments.data || []
     });
+    
   } catch (e) {
     console.error('❌ Get artwork error:', e);
     res.status(500).json({ error: e.message });
@@ -273,6 +302,9 @@ app.delete('/api/artworks/:id', async (req, res) => {
     console.error('❌ Delete error:', e); 
     res.status(500).json({ error: e.message }); 
   }
+  if (art.user_id !== userId) {
+  return res.status(403).json({ error: 'Только владелец может удалить работу' });
+}
 });
 
 // === API: UPLOAD ===
@@ -298,10 +330,12 @@ const publicUrl = publicUrlResult.data.publicUrl;
 });
 
 // === API: USER PROFILE ===
+// === API: USER PROFILE — БЕЗОПАСНАЯ ВЕРСИЯ ===
 app.get('/api/user/:id', async (req, res) => {
   try {
     console.log('📥 GET /api/user/:id -', req.params.id);
     
+    // 🔧 Получаем пользователя
     const {  user, error } = await supabase
       .from('users')
       .select('id,name,username,email,art_type,bio,avatar_color,avatar_url')
@@ -313,6 +347,7 @@ app.get('/api/user/:id', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
+    // 🔧 Получаем работы пользователя (без JOIN)
     const {  arts } = await supabase
       .from('artworks')
       .select('id,title,type,likes,views,total_donated,image_url,gradient,created_at')
@@ -320,6 +355,7 @@ app.get('/api/user/:id', async (req, res) => {
       .order('created_at', { ascending: false });
     
     res.json({ user, artworks: arts || [] });
+    
   } catch(e) { 
     console.error('❌ User error:', e); 
     res.status(500).json({ error: e.message }); 
