@@ -188,37 +188,63 @@ function filterFeed(type, btn) {
 
 async function openArt(artId) {
   try { 
-    const { art, ratings, comments } = await api(`artworks/${artId}`); 
-    if (!art) return notify('Работа не найдена', 'warning');
-    const avg = art.avgRating || 0;
-    const img = art.image_url ? `<img src="${art.image_url}" style="width:100%;max-height:320px;object-fit:contain;background:#000;border-radius:var(--radius)" onerror="this.outerHTML='<div style=\\'width:100%;height:280px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7)\\'>${TYPES[art.type]?.name||'Изображение'}</div>'">` : `<div style="width:100%;height:280px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);border-radius:var(--radius)">${TYPES[art.type]?.name || 'Арт'}</div>`;
-    const authorName = art.author_name || 'Аноним';
-    const authorAvatar = art.avatar_url ? `<img src="${art.avatar_url}" alt="${authorName}">` : (authorName.charAt(0) || '?');
-    const rateSection = (currentUser && currentUser.id !== art.user_id) ? renderRates(art, ratings) : `<div class="rating-section"><div class="overall-score"><div class="score-circle"><span style="color:${avg>=7?'var(--success)':avg>=5?'var(--warning)':'var(--accent)'}">${avg.toFixed(1)}</span></div><div class="score-details"><h4>Средняя оценка</h4><p>На основе ${ratings?.length || 0} оценок</p></div></div></div>`;
+    console.log('🔍 Opening artwork:', artId);
+    const response = await api(`artworks/${artId}`);
     
-    // 🔧 ПРОВЕРКА РЕЙТИНГОВ
-    console.log('📊 Ratings loaded:', ratings?.length, 'items');
-
+    // 🔧 Проверка структуры ответа
+    if (!response || !response.art) {
+      console.error('❌ Invalid response structure:', response);
+      return notify('Ошибка загрузки работы', 'warning');
+    }
+    
+    const { art, ratings, comments } = response;
+    const avg = art.avgRating || 0;
+    
+    const img = art.image_url 
+      ? `<img src="${art.image_url}" style="width:100%;max-height:320px;object-fit:contain;background:#000;border-radius:var(--radius)" onerror="this.outerHTML='<div style=\\'width:100%;height:280px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7)\\'>${TYPES[art.type]?.name||'Изображение'}</div>'">` 
+      : `<div style="width:100%;height:280px;background:${art.gradient};display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.7);border-radius:var(--radius)">${TYPES[art.type]?.name || 'Арт'}</div>`;
+    
+    const authorName = art.author_name || 'Аноним';
+    const authorAvatar = art.avatar_url 
+      ? `<img src="${art.avatar_url}" alt="${authorName}">` 
+      : (authorName.charAt(0) || '?');
+    
+    const rateSection = (currentUser && currentUser.id !== art.user_id) 
+      ? renderRates(art, ratings) 
+      : `<div class="rating-section"><div class="overall-score"><div class="score-circle"><span style="color:${avg>=7?'var(--success)':avg>=5?'var(--warning)':'var(--accent)'}">${avg.toFixed(1)}</span></div><div class="score-details"><h4>Средняя оценка</h4><p>На основе ${ratings?.length || 0} оценок</p></div></div></div>`;
+    
     const commentsHtml = (comments || []).map(c => {
       const cAuthor = c.users?.name || 'Аноним';
-      const cAvatar = c.users?.avatar_url ? `<img src="${c.users.avatar_url}" alt="${cAuthor}">` : (cAuthor.charAt(0) || '?');
+      const cAvatar = c.users?.avatar_url 
+        ? `<img src="${c.users.avatar_url}" alt="${cAuthor}">` 
+        : (cAuthor.charAt(0) || '?');
       return `<div class="comment"><div class="comment-avatar" style="background:linear-gradient(135deg,${c.users?.avatar_color||'#6366f1'},#3b82f1)">${cAvatar}</div><div class="comment-content"><div class="comment-author">${cAuthor}</div><div class="comment-text">${escapeHtml(c.text || '')}</div><div class="comment-time">${new Date(c.created_at).toLocaleDateString('ru-RU')}</div></div></div>`;
     }).join('') || '<p style="color:var(--text-muted);text-align:center;padding:0.8rem">Пока нет комментариев</p>';
     
-    const commentInputHtml = (currentUser && currentUser.id !== art.user_id) ? `<div class="comment-input"><input type="text" id="commentIn" placeholder="Написать комментарий..." autocomplete="off"><button class="btn btn-sm btn-primary" onclick="addComment('${artId}')">➤</button></div>` : '';
-    const deleteBtnHtml = (currentUser && currentUser.id === art.user_id) ? `<div style="margin-top:1rem;padding:0.7rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px"><p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.4rem">Вы владелец</p><button class="btn btn-sm" style="background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4)" onclick="deleteArtwork('${artId}')">🗑️ Удалить</button></div>` : '';
+    const commentInputHtml = (currentUser && currentUser.id !== art.user_id) 
+      ? `<div class="comment-input"><input type="text" id="commentIn" placeholder="Написать комментарий..." autocomplete="off"><button class="btn btn-sm btn-primary" onclick="addComment('${art.id}')">➤</button></div>` 
+      : '';
     
-    document.getElementById('modalContent').innerHTML = `${img}<div class="modal-body"><h2>${art.title}</h2><p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:0.7rem">${TYPES[art.type]?.name} • ${new Date(art.created_at).toLocaleDateString('ru-RU')}</p><p class="description">${art.description || ''}</p><div class="modal-author-row"><div class="author"><div class="avatar" style="width:38px;height:38px;font-size:0.85rem;background:linear-gradient(135deg,${art.avatar_color||'#6366f1'},#3b82f1)" onclick="viewUserProfile('${art.user_id}')" style="cursor:pointer">${authorAvatar}</div><div><div style="font-weight:600;cursor:pointer" onclick="viewUserProfile('${art.user_id}')">${authorName}</div><div style="font-size:0.75rem;color:var(--text-muted)">${art.author_username || ''}</div></div></div><div style="display:flex;gap:0.4rem"><button class="btn btn-sm btn-secondary" onclick="like('${artId}')">❤️ ${art.likesCount || 0}</button><button class="donate-btn" style="padding:0.35rem 0.8rem" onclick="closeModal('artworkModal');openDonate('${artId}')">Донат</button></div></div>${rateSection}<div class="comments-section"><h3>Комментарии (${comments?.length || 0})</h3>${commentInputHtml}${deleteBtnHtml}<div id="commList">${commentsHtml}</div></div></div>`;
+    const deleteBtnHtml = (currentUser && currentUser.id === art.user_id) 
+      ? `<div style="margin-top:1rem;padding:0.7rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px"><p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.4rem">Вы владелец</p><button class="btn btn-sm" style="background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4)" onclick="deleteArtwork('${art.id}')">🗑️ Удалить</button></div>` 
+      : '';
+    
+    document.getElementById('modalContent').innerHTML = `${img}<div class="modal-body"><h2>${art.title}</h2><p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:0.7rem">${TYPES[art.type]?.name} • ${new Date(art.created_at).toLocaleDateString('ru-RU')}</p><p class="description">${art.description || ''}</p><div class="modal-author-row"><div class="author"><div class="avatar" style="width:38px;height:38px;font-size:0.85rem;background:linear-gradient(135deg,${art.avatar_color||'#6366f1'},#3b82f1)" onclick="viewUserProfile('${art.user_id}')">${authorAvatar}</div><div><div style="font-weight:600;cursor:pointer" onclick="viewUserProfile('${art.user_id}')">${authorName}</div><div style="font-size:0.75rem;color:var(--text-muted)">${art.author_username || ''}</div></div></div><div style="display:flex;gap:0.4rem"><button class="btn btn-sm btn-secondary" onclick="like('${art.id}')">❤️ ${art.likesCount || 0}</button><button class="donate-btn" style="padding:0.35rem 0.8rem" onclick="closeModal('artworkModal');openDonate('${art.id}')">Донат</button></div></div>${rateSection}<div class="comments-section"><h3>Комментарии (${comments?.length || 0})</h3>${commentInputHtml}${deleteBtnHtml}<div id="commList">${commentsHtml}</div></div></div>`;
     
     const commentInput = document.getElementById('commentIn');
     if (commentInput) {
       const newInput = commentInput.cloneNode(true);
       commentInput.parentNode.replaceChild(newInput, commentInput);
-      newInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') { e.preventDefault(); addComment(artId); } }, { passive: false });
+      newInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') { e.preventDefault(); addComment(art.id); } }, { passive: false });
     }
+    
     document.getElementById('artworkModal')?.classList.add('show'); 
     document.body.style.overflow = 'hidden';
-  } catch(e) { console.error('Open art error:', e); notify('Ошибка', 'warning'); }
+    
+  } catch(e) { 
+    console.error('❌ Open art error:', e); 
+    notify('Ошибка: ' + e.message, 'warning'); 
+  }
 }
 
 function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
